@@ -199,6 +199,37 @@ void restore_console_state(void)
     console_state_saved = false;
 }
 
+// Allocate pthread_t struct, and creates a thread
+// Returns  pointer to pthread_t or  NULL if memory allocation or thread creation failed
+static pthread_t* create_thread(const pthread_attr_t* attr,
+                        void* (*start_routine)(void*),
+                        void *arg) {
+    pthread_t* pt = calloc(1, sizeof(*pt));
+    if (pt) {
+        if (pthread_create(pt, attr, start_routine, arg)) {
+            free(pt);
+            pt = NULL;
+        }
+    }
+    return pt;
+}
+
+// perform a join on a thread, previously created by create_thread.
+// Takes a pointer to pthread_t*,
+//  checks contents for NULL,
+//  if non NULL:
+//    - performs a join,
+//    - frees associated memory
+//    - sets the pointer to pthread_t to NULL
+static void join_thread(pthread_t** ppt) {
+    if (*ppt) {
+        pthread_t* pt = *ppt;
+        pthread_join(*pt, NULL);
+        free((void*)pt);
+        *ppt = NULL;
+    }
+}
+
 void log_msg(int level, const char *fmt, ...)
 {	// Thread safe print of log entry
     if (level <= atomic_load(&log_level))
@@ -262,6 +293,7 @@ void release_system_resources()
 void handle_signal(int sig)
 {
     (void)sig;
+    fprintf(stderr, "Got signal %d, terminating\n", sig);
     keep_running = 0;
 }
 
@@ -440,7 +472,6 @@ void init_destination_shm(vis_t *shm_ptr)
     pthread_rwlock_init(&shm_ptr->rwlock, &attr);
     pthread_rwlockattr_destroy(&attr);
 
-    // Nests variables inside .hdr target layout
     shm_ptr->buf_size = VIS_BUF_SIZE;
     shm_ptr->buf_index = 0;
     shm_ptr->running = false;
@@ -759,8 +790,7 @@ void run_destination(const char *server_ip)
     hb_ctx_t *hb_ctx = (hb_ctx_t *)malloc(sizeof(hb_ctx_t));
     hb_ctx->sock_fd_ptr = &global_sock_fd;
     hb_ctx->server_addr = server_addr;
-    pthread_t hb_thread;
-    pthread_create(&hb_thread, NULL, heartbeat_loop, hb_ctx);
+    pthread_t* hb_thread = create_thread(NULL, heartbeat_loop, hb_ctx);
 
     char rx_window[sizeof(msg_hdr_t) + sizeof(vis_t)];
     struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
@@ -976,7 +1006,7 @@ void run_destination(const char *server_ip)
             sendto(global_sock_fd, &ack_hdr, sizeof(msg_hdr_t), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
         }
     }
-    pthread_join(hb_thread, NULL);
+    join_thread(&hb_thread);
 }
 
 void *discovery_responder_thread(void *arg)
@@ -1280,10 +1310,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    pthread_t ui_thread, disc_thread;
+    pthread_t* ui_thread=NULL;
+    pthread_t* disc_thread=NULL;
     has_interactive_tty = isatty(STDIN_FILENO);
     if (has_interactive_tty)
-        pthread_create(&ui_thread, NULL, console_listener_thread, NULL);
+        ui_thread = create_thread(NULL, console_listener_thread, NULL);
 
     if (is_source && !mac_input && !resolve_source_shm())
     {
@@ -1298,18 +1329,20 @@ int main(int argc, char *argv[])
     {
         int *role_payload = (int *)malloc(sizeof(int));
         *role_payload = is_source ? 1 : 2;
-        pthread_create(&disc_thread, NULL, discovery_responder_thread, role_payload);
+        disc_thread = create_thread(NULL, discovery_responder_thread, role_payload);
     }
 
     if (is_source)
+    {
         run_source();
+    }
     else if (is_dest && server_ip)
+    {
         run_destination(server_ip);
+    }
 
-    if (!disable_discovery_listener)
-        pthread_join(disc_thread, NULL);
-    if (has_interactive_tty)
-        pthread_join(ui_thread, NULL);
+    join_thread(&disc_thread);
+    join_thread(&ui_thread);
 
     release_system_resources();
     return 0;
