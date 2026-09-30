@@ -83,7 +83,7 @@ void log_msg(int level, const char *fmt, ...)
         char t_str[32];
         struct tm *tm_info = localtime(&now);
         strftime(t_str, sizeof(t_str), "%Y-%m-%d %H:%M:%S", tm_info);
-        
+
         const char *lbl = "INFO";
         if (level == -1)
             lbl = "NOTICE";
@@ -96,11 +96,11 @@ void log_msg(int level, const char *fmt, ...)
 
         va_list args;
         va_start(args, fmt);
-        
-        char msg_buffer[LOG_BUF_SIZE]; 
+
+        char msg_buffer[LOG_BUF_SIZE];
         // vsnprintf returns the length the string *would* have been
         int result = vsnprintf(msg_buffer, sizeof(msg_buffer), fmt, args);
-        
+
         va_end(args);
 
         // Check if the message was truncated
@@ -108,7 +108,7 @@ void log_msg(int level, const char *fmt, ...)
         {
             // Calculate where to overlay the truncation tag at the end of the buffer
             size_t overwrite_pos = sizeof(msg_buffer) - strlen(TRUNC_TAG) - 1;
-            
+
             // Append the tag cleanly, ensuring a null terminator is kept
 			snprintf(&msg_buffer[overwrite_pos], strlen(TRUNC_TAG) + 1, "%s", TRUNC_TAG);
         }
@@ -169,4 +169,93 @@ bool validate_mac_spec(const char *mac_in)
     if (hex_chars != 12)
         return false;
     return true;
+}
+
+static void *discovery_responder_thread(void *arg)
+{
+    discovery_responder_spec_t spec;
+    memcpy(&spec, arg, sizeof(spec));
+    free(arg);
+
+    int disc_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (disc_fd < 0)
+        return NULL;
+
+    int reuse = 1;
+    setsockopt(disc_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    struct sockaddr_in disc_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(discover_port),
+        .sin_addr.s_addr = INADDR_ANY};
+
+    if (bind(disc_fd, (struct sockaddr *)&disc_addr, sizeof(disc_addr)) < 0)
+    {
+        log_msg(1, "Discovery port %d is already in use by another application! "
+                   "Background service discovery responder is disabled.",
+                discover_port);
+        close(disc_fd);
+        return NULL;
+    }
+
+    disc_req_packet_t rx_packet;
+    struct sockaddr_in client_addr;
+
+    while (keep_running)
+    {
+        fd_set rfds;
+        struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
+        FD_ZERO(&rfds);
+        FD_SET(disc_fd, &rfds);
+
+        int retval = select(disc_fd + 1, &rfds, NULL, NULL, &tv);
+        if (retval > 0 && FD_ISSET(disc_fd, &rfds))
+        {
+            socklen_t addr_len = sizeof(client_addr);
+            ssize_t len = recvfrom(disc_fd, &rx_packet, sizeof(disc_req_packet_t), 0,
+                                   (struct sockaddr *)&client_addr, &addr_len);
+
+            if (len == sizeof(disc_req_packet_t) && rx_packet.type == PACKET_REQ)
+            {
+                if (strncmp(rx_packet.magic, DISCOVER_MAGIC, sizeof(DISCOVER_MAGIC)) == 0)
+                {
+                    disc_resp_packet_t tx_packet;
+                    memset(&tx_packet, 0, sizeof(tx_packet));
+
+                    memcpy(tx_packet.magic, DISCOVER_MAGIC, sizeof(DISCOVER_MAGIC));
+                    tx_packet.type = PACKET_ACK;
+                    tx_packet.role = (uint8_t)spec.role_id;
+                    tx_packet.port = htonl((uint32_t)port);
+                    snprintf(tx_packet.version, sizeof(tx_packet.version), "%s", APP_VERSION);
+
+//                    // Extract clean mac address from global path allocations
+//                    char *mac_ptr = strchr(shm_path, '-');
+//                    if (mac_ptr)
+//                        snprintf(tx_packet.mac, sizeof(tx_packet.mac), "%s", mac_ptr + 1);
+//                    else
+//                        snprintf(tx_packet.mac, sizeof(tx_packet.mac), "00:00:00:00:00:00");
+                    snprintf(tx_packet.mac, sizeof(tx_packet.mac), "%s", spec.mac);
+
+                    char target_ip_str[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &client_addr.sin_addr, target_ip_str, INET_ADDRSTRLEN);
+
+                    // Debug log output tracing the dynamic network reply dispatch
+                    log_msg(3, "Dispatching discovery response packet back to prober host: %s:%d",
+                            target_ip_str, ntohs(client_addr.sin_port));
+
+                    sendto(disc_fd, &tx_packet, sizeof(disc_resp_packet_t), 0,
+                           (struct sockaddr *)&client_addr, sizeof(client_addr));
+                }
+            }
+        }
+    }
+    close(disc_fd);
+    return NULL;
+}
+
+pthread_t* run_discovery_responder(int role_id, const char* mac) {
+    discovery_responder_spec_t* responder_spec = calloc(1, sizeof(*responder_spec));
+    responder_spec->role_id = role_id;
+    strcpy(responder_spec->mac, mac);
+    return create_thread(NULL, discovery_responder_thread, responder_spec);
 }

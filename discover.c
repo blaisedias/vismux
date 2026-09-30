@@ -33,9 +33,12 @@ int main(int argc, char *argv[])
     {
         if (strcmp(argv[i], "--source") == 0 ) {
             role_filter = 1;
-        }
-        else if (strcmp(argv[i], "--destination") == 0 ) {
+        } else if (strcmp(argv[i], "--destination") == 0 ) {
             role_filter = 2;
+        } else if (strcmp(argv[i], "--discover-timeout") == 0 && i + 1 < argc) {
+            discover_timeout_secs = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--discover-port") == 0 && i + 1 < argc) {
+            discover_port = atoi(argv[++i]);
         } else {
             fprintf(stderr, "Unrecognized option: %s.\n", argv[i]);
             return 1;
@@ -51,7 +54,7 @@ int main(int argc, char *argv[])
                 }
                 char ip_str[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &discovery->records[ix].ip, ip_str, INET_ADDRSTRLEN);
-        
+
                 printf("type:%s, IP address:%s, port:%u, MAC address:%s, version: %s\n",
                     (discovery->records[ix].role == 1) ? "SOURCE" : "DESTINATION",
                     ip_str,

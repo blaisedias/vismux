@@ -36,6 +36,7 @@ int main(int argc, char *argv[])
     bool daemonise = false;
     const char* logfile = NULL;
     pthread_t* ui_thread = NULL;
+    bool discoverable = true;
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
@@ -89,9 +90,11 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--stats-int") == 0 ) {
             ARG_AVAIL(1);
             stats_int = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--no-discover") == 0) {
+            discoverable = false;
         } else if (strcmp(argv[i], "-z") == 0 || strcmp(argv[i], "--daemonise") == 0) {
             daemonise = true;
-        } else if ( (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--logfile") == 0) 
+        } else if ( (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--logfile") == 0)
                 && i + 1 < argc) {
             ++i;
             logfile = argv[i];
@@ -139,6 +142,7 @@ int main(int argc, char *argv[])
 //    }
     for(int ix =0; ix < (int)(sizeof(specs)/sizeof(specs[0])); ++ix) {
         destination_spec_t* spec = specs + ix;
+        spec->discoverable = discoverable;
         if (spec->keep_running && spec->server_ip && spec->mac) {
             threads[ix] = create_thread(NULL, run_destination_thread, spec);
         }

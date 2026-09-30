@@ -160,6 +160,11 @@ typedef struct {
 } discover_records_t;
 
 typedef struct {
+    int role_id;
+    char mac[18];
+} discovery_responder_spec_t;
+
+typedef struct {
     int shm_fd;
     int sock_fd;
     vis_t *shm_ptr;
@@ -171,6 +176,7 @@ typedef struct {
     const char* server_ip;
     const char* mac;
     volatile bool keep_running;
+    bool  discoverable;
 } destination_spec_t;
 
 bool validate_and_format_mac(const char *mac_in, char *shm_out, size_t out_len);
@@ -186,9 +192,12 @@ void join_thread(pthread_t** ppt);
 void run_destination(destination_spec_t* spec);
 void* run_destination_thread(void*);
 
+void run_source(const char* _shm_path, const char* mac, bool discoverable);
+
 void *console_listener_thread(void *arg);
 // returns allocated memory, to be freed by the caller
 discover_records_t* run_discovery_prober(uint8_t role_filter);
+pthread_t* run_discovery_responder(int role_id, const char* mac);
 
 // global variables defined in vismux_common.c
 extern volatile sig_atomic_t keep_running;

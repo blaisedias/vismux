@@ -4,7 +4,8 @@ LIBS =
 LIBSOSX = 
 
 # Shared compilation parameters across all hardware environments
-CFLAGS_COMMON = -Wall -Wextra -O3 -pthread -D_FILE_OFFSET_BITS=64 -g
+CFLAGS_COMMON = -Wall -Wextra -O3 -pthread -D_FILE_OFFSET_BITS=64
+CFLAGS_COMMON = -Wall -Wextra -g -O0 -pthread -D_FILE_OFFSET_BITS=64
 
 # Target-Specific Variable Extensions
 CFLAGS_NAT     = 
@@ -36,13 +37,17 @@ TARGET_ARMV6   = vismux-armv6
 .PHONY: clean
 
 # Running a bare 'make' compiles the host's native setup
-all: dvismux discover
+all: dvismux discover svismux
 
 # 1. Native Shorthand Target (Matches current host CPU architecture layout)
 native: $(TARGET_NATIVE)
 
 vismux_destination.o: vismux_destination.c vismux.h
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
+
+vismux_source.o: vismux_source.c vismux.h
+	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
+
 
 vismux_discover.o: vismux_discover.c vismux.h
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
@@ -57,6 +62,11 @@ vismux_common.o: vismux_common.c vismux.h
 dvismux: dvismux.c vismux_destination.o console.o vismux_common.o
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -o dvismux $(LIBS) vismux_destination.o console.o vismux_common.o
 	@echo "[+] Compiled local native binary: dvismux"
+
+svismux: svismux.c vismux_source.o console.o vismux_common.o
+	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -o svismux $(LIBS) vismux_source.o console.o vismux_common.o
+	@echo "[+] Compiled local native binary: svismux"
+
 
 discover: discover.c vismux_discover.o vismux_common.o
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -o discover $(LIBS) vismux_discover.o vismux_common.o
@@ -97,4 +107,4 @@ nativeosx: vismux.c
 	@echo "[+] Compiled local native binary: $(TARGET_NATIVEOSX)"
 	
 clean:
-	rm -f $(TARGET_NATIVE) $(TARGET_X86_64) $(TARGET_X86_32) $(TARGET_ARM64) $(TARGET_ARMHF) $(TARGET_ARMV6) *.o dvismux discover
+	rm -f $(TARGET_NATIVE) $(TARGET_X86_64) $(TARGET_X86_32) $(TARGET_ARM64) $(TARGET_ARMHF) $(TARGET_ARMV6) *.o dvismux discover svismux

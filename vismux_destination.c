@@ -112,7 +112,7 @@ static bool setup_destination_shm(destination_context_t* ctxt)
     {
         init_destination_shm(ctxt->shm_ptr);
     }
-    
+
     return true;
 }
 
@@ -138,6 +138,9 @@ void *heartbeat_loop(void *arg)
 
 void run_destination(destination_spec_t* spec)
 {
+    pthread_t* hb_thread = NULL;
+    pthread_t* disc_thread = NULL;
+
     destination_context_t ctxt = {
         .shm_fd = -1,
         .sock_fd = -1,
@@ -178,8 +181,12 @@ void run_destination(destination_spec_t* spec)
     hb_ctx->sock_fd_ptr = &ctxt.sock_fd;
     hb_ctx->server_addr = server_addr;
     hb_ctx->keep_running = &spec->keep_running;
-    pthread_t hb_thread;
-    pthread_create(&hb_thread, NULL, heartbeat_loop, hb_ctx);
+
+    hb_thread = create_thread(NULL, heartbeat_loop, hb_ctx);
+
+    if (spec->discoverable) {
+        disc_thread = run_discovery_responder(2, spec->mac);
+    }
 
     char rx_window[sizeof(msg_hdr_t) + sizeof(vis_t)];
     struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
@@ -398,13 +405,16 @@ void run_destination(destination_spec_t* spec)
             sendto(ctxt.sock_fd, &ack_hdr, sizeof(msg_hdr_t), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
         }
     }
-    pthread_join(hb_thread, NULL);
+    join_thread(&hb_thread);
+    join_thread(&disc_thread);
     release_system_resources(&ctxt);
 }
 
 void* run_destination_thread(void* arg) {
     if (arg ) {
-        run_destination((destination_spec_t*) arg);
+        destination_spec_t spec;
+        memcpy(&spec, arg, sizeof(spec));
+        run_destination(&spec);
     } else {
         log_msg(-1, "run_destination_thread with NULL argument");
     }
