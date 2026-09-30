@@ -64,6 +64,10 @@
 #define PACKET_ACK 0x03
 #define PACKET_SUB_ACK 0x04
 
+#define STATS_LOG_LEVEL 3
+#define LOG_BUF_SIZE 1024	// Maximum length of single log message
+#define TRUNC_TAG " ... [TRUNCATED]"
+
 // Discovery Layer Configuration Constants
 #define DISCOVER_PORT (DEFAULT_PORT + 1)
 #define DISCOVER_MAGIC "VISMUXv0"
@@ -140,6 +144,21 @@ typedef struct
     char version[DISCOVER_VERSION_LEN]; // Application version; absent in legacy responses
 } __attribute__((packed)) disc_resp_packet_t;
 
+typedef struct
+{
+    uint32_t ip;
+    uint32_t port;
+    char mac[18]; // Storage footprint to match clean "XX:XX:XX:XX:XX:XX\0" length bounds
+    uint8_t role;
+    char version[16];
+} peer_record_t;
+
+#define MAX_SEEN_PEERS 64
+typedef struct {
+    int count;
+    peer_record_t records[MAX_SEEN_PEERS];
+} discover_records_t;
+
 typedef struct {
     int shm_fd;
     int sock_fd;
@@ -152,7 +171,7 @@ typedef struct {
     const char* server_ip;
     const char* mac;
     volatile bool keep_running;
-}destination_spec_t;
+} destination_spec_t;
 
 bool validate_and_format_mac(const char *mac_in, char *shm_out, size_t out_len);
 bool validate_mac_spec(const char *mac_in);
@@ -168,6 +187,8 @@ void run_destination(destination_spec_t* spec);
 void* run_destination_thread(void*);
 
 void *console_listener_thread(void *arg);
+// returns allocated memory, to be freed by the caller
+discover_records_t* run_discovery_prober(uint8_t role_filter);
 
 // global variables defined in vismux_common.c
 extern volatile sig_atomic_t keep_running;
@@ -183,5 +204,6 @@ extern int forced_proto_version;
 extern bool keep_shm;
 extern bool wait_for_shm;
 extern bool has_interactive_tty;
-
+extern int discover_timeout_secs;
+extern int discover_port;
 #endif // __vismux_h_

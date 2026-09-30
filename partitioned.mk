@@ -33,27 +33,34 @@ TARGET_ARM64   = vismux-aarch64
 TARGET_ARMHF   = vismux-armhf
 TARGET_ARMV6   = vismux-armv6
 
-.PHONY: all clean native nativeosx x86_64 x86-32 aarch64 armhf armv6 *.o dvismux
+.PHONY: clean
 
 # Running a bare 'make' compiles the host's native setup
-all: native
+all: dvismux discover
 
 # 1. Native Shorthand Target (Matches current host CPU architecture layout)
 native: $(TARGET_NATIVE)
 
-vismux_destination.o: vismux_destination.c
+vismux_destination.o: vismux_destination.c vismux.h
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
 
-console.o: console.c
+vismux_discover.o: vismux_discover.c vismux.h
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
 
-vismux_common.o: vismux_common.c
+console.o: console.c vismux.h
+	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
+
+vismux_common.o: vismux_common.c vismux.h
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -c
 
 
 dvismux: dvismux.c vismux_destination.o console.o vismux_common.o
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -o dvismux $(LIBS) vismux_destination.o console.o vismux_common.o
 	@echo "[+] Compiled local native binary: dvismux"
+
+discover: discover.c vismux_discover.o vismux_common.o
+	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -o discover $(LIBS) vismux_discover.o vismux_common.o
+	@echo "[+] Compiled local native binary: discover"
 
 $(TARGET_NATIVE): vismux.c vismux_destination.o
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_NAT) $< -o $(TARGET_NATIVE) $(LIBS) vismux_destination.o
@@ -90,4 +97,4 @@ nativeosx: vismux.c
 	@echo "[+] Compiled local native binary: $(TARGET_NATIVEOSX)"
 	
 clean:
-	rm -f $(TARGET_NATIVE) $(TARGET_X86_64) $(TARGET_X86_32) $(TARGET_ARM64) $(TARGET_ARMHF) $(TARGET_ARMV6)
+	rm -f $(TARGET_NATIVE) $(TARGET_X86_64) $(TARGET_X86_32) $(TARGET_ARM64) $(TARGET_ARMHF) $(TARGET_ARMV6) *.o dvismux discover

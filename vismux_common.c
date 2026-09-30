@@ -41,6 +41,8 @@ int forced_proto_version = 2;
 bool keep_shm = true;
 bool wait_for_shm = false;
 bool has_interactive_tty = false;	// set in main
+int discover_timeout_secs = 2;
+int discover_port = DISCOVER_PORT; // Overridable runtime discovery port descriptor
 
 // Allocate pthread_t struct, and creates a thread
 // Returns  pointer to pthread_t or  NULL if memory allocation or thread creation failed

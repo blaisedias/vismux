@@ -25,20 +25,6 @@
  ****************************************************************/
 #include "vismux.h"
 
-extern volatile sig_atomic_t keep_running;
-extern atomic_int log_level;	// Atomic because it can be written to from console_listener_thread and read from other threads
-extern atomic_int force_stats_log;	// Atomic because it can be written to from console_listener_thread and read/reset from other threads
-#define STATS_LOG_LEVEL 3
-#define LOG_BUF_SIZE 1024	// Maximum length of single log message
-#define TRUNC_TAG " ... [TRUNCATED]"
-extern int port;
-//int target_fps = DEFAULT_FPS;
-extern int stats_int;
-extern int timeout_secs;
-extern int mac_timeout_secs;
-extern int forced_proto_version;
-extern bool keep_shm;
-
 static void release_system_resources(destination_context_t* ctxt)
 {
     if (ctxt->shm_ptr != MAP_FAILED)

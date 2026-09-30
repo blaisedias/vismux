@@ -4,10 +4,6 @@ static struct termios console_old_opts;
 static int console_old_flags = -1;
 static bool console_state_saved = false;
 
-extern volatile sig_atomic_t keep_running;
-extern atomic_int log_level;	// Atomic because it can be written to from console_listener_thread and read from other threads
-extern atomic_int force_stats_log;	// Atomic because it can be written to from console_listener_thread and read/reset from other threads
-
 static void restore_console_state(void)
 {
     if (!console_state_saved)
