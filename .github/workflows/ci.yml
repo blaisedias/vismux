@@ -117,7 +117,7 @@ jobs:
         mkdir -p release
         # Do not include "native" in packaging. The compilation section verifies that it compiles but no need to publish
         # since it is for end-users to compile their own
-        for target in x86_64 x86_32 aarch64 armhf armv6; do
+        for target in x86_64 x86_32 aarch64 armhf armv6 armv5; do
           archive="vismux-${GITHUB_REF_NAME}-${target}.tar.gz"
           tar -czf "release/$archive" \
             "vismux-$target" \
