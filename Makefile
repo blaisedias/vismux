@@ -34,7 +34,7 @@ CFLAGS_ARM64  = -march=armv8-a
 CFLAGS_ARMHF  = -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard
 # Use -static for ARMV6 because being built with mus library which might not be on target system
 CFLAGS_ARMV6  = -march=armv6 -static -marm -mfpu=vfp -mfloat-abi=hard
-CFLAGS_ARMV5  = -march=armv5te -static -marm -mfloat-abi=soft -mthumb
+CFLAGS_ARMV5  = -march=armv5te -static -marm -mfloat-abi=soft -mthumb -fPIC -O3
 
 # Explicitly Defined Architectural Output Signatures
 TARGET_NATIVE  = vismux
