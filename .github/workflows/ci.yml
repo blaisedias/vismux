@@ -55,6 +55,9 @@ jobs:
         # outside of GitHub Actions because it is blocked ... wget https://musl.cc/armv6-linux-musleabihf-cross.tgz -o tools/musl.cc/armv6-linux-musleabihf-cross.tgz
         tar -xzf tools/armv6-linux-musleabihf-cross.tgz -C tools/
         echo "$GITHUB_WORKSPACE/tools/armv6-linux-musleabihf-cross/bin" >> $GITHUB_PATH
+        # For cross-compile to armv5 (ancient NAS - untested)
+        tar -xzf tools/armel-linux-musleabi-cross.tgz -C tools/
+        echo "$GITHUB_WORKSPACE/tools/armel-linux-musleabi-cross/bin" >> $GITHUB_PATH
 
     - name: Verify Native Architecture Binary Compilation
       run: |
@@ -80,6 +83,10 @@ jobs:
       run: |
         make armv6
 
+    - name: Verify Cross-Compiled ARMv5 (ancient NAS) 32-bit Binary Compilation
+      run: |
+        make armv5
+
     - name: Verify Binary Headers using Kernel File Inspector
       run: |
         for target in native x86_64 x86_32 aarch64 armhf armv6; do
@@ -97,7 +104,7 @@ jobs:
       run: |
         # Validates that native x86-compatible targets boot cleanly in this runner
         for target in "" -x86_64 -x86_32; do
-          for binary in vismux vismux_destination vismux_source; do
+          for binary in vismux vismux_destination vismux_source vismux_discover; do
             "./${binary}${target}" --version
           done
         done

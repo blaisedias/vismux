@@ -28,10 +28,13 @@ ARM32_CC      = arm-linux-gnueabihf-gcc
 ARM32_AR      = arm-linux-gnueabihf-ar
 ARM32V6_CC    = armv6-linux-musleabihf-gcc
 ARM32V6_AR    = armv6-linux-musleabihf-ar
+ARM32V5_CC    = armel-linux-musleabi-gcc
+ARM32V5_AR    = armel-linux-musleabi-ar
 CFLAGS_ARM64  = -march=armv8-a
 CFLAGS_ARMHF  = -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard
 # Use -static for ARMV6 because being built with mus library which might not be on target system
 CFLAGS_ARMV6  = -march=armv6 -static -marm -mfpu=vfp -mfloat-abi=hard
+CFLAGS_ARMV5  = -march=armv5te -static -marm -mfloat-abi=soft -mthumb
 
 # Explicitly Defined Architectural Output Signatures
 TARGET_NATIVE  = vismux
@@ -41,8 +44,9 @@ TARGET_X86_32  = vismux-x86_32
 TARGET_ARM64   = vismux-aarch64
 TARGET_ARMHF   = vismux-armhf
 TARGET_ARMV6   = vismux-armv6
+TARGET_ARMV5   = vismux-armv5
 
-CROSS_ARCHES = x86_64 x86_32 aarch64 armhf armv6
+CROSS_ARCHES = x86_64 x86_32 aarch64 armhf armv6 armv5
 CROSS_EXECUTABLES = $(foreach arch,$(CROSS_ARCHES),vismux-$(arch) vismux_destination-$(arch) vismux_discover-$(arch) vismux_source-$(arch))
 
 CROSS_CC_x86_64 = $(CC)
@@ -60,6 +64,9 @@ CROSS_CFLAGS_armhf = $(CFLAGS_ARMHF)
 CROSS_CC_armv6 = $(ARM32V6_CC)
 CROSS_AR_armv6 = $(ARM32V6_AR)
 CROSS_CFLAGS_armv6 = $(CFLAGS_ARMV6)
+CROSS_CC_armv5 = $(ARM32V5_CC)
+CROSS_AR_armv5 = $(ARM32V5_AR)
+CROSS_CFLAGS_armv5 = $(CFLAGS_ARMV5)
 
 .PHONY: all clean $(CROSS_ARCHES)
 
@@ -147,7 +154,7 @@ nativeosx: vismux.c vismux.a
 	@echo "[+] Compiled local native binary: $(TARGET_NATIVEOSX)"
 	
 clean:
-	rm -f $(TARGET_NATIVE) $(TARGET_X86_64) $(TARGET_X86_32) $(TARGET_ARM64) $(TARGET_ARMHF) $(TARGET_ARMV6) $(CROSS_EXECUTABLES) \
+	rm -f $(TARGET_NATIVE) $(TARGET_X86_64) $(TARGET_X86_32) $(TARGET_ARM64) $(TARGET_ARMHF) $(TARGET_ARMV6) $(TARGET_ARMV5) $(CROSS_EXECUTABLES) \
 		vismux_destination vismux_discover vismux_source \
 		*.o *.a
 	rm -rf build

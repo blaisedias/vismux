@@ -13,6 +13,8 @@ For the integration with PeppyMeter:
 
 *   **Upstream Repository:** [project-owner/PeppyMeter] (GitHub)](https://github.com)
 
+Cross-compilation to ARMv6 and ARMv5 uses musl - https://musl.cc/
+
 ### Critical Sections in `output_vis.c` to Analyze:
 1.  **The Shared Memory Struct Definition:** Look for the static block definition `struct vis_t` inside `output_vis.c`. This establishes the strict sequential byte order, variable tracking types, and internal memory padding.
 2.  **POSIX MMap Name Generation:** Review the `output_init_vis()` implementation. Note how Squeezelite dynamically builds its POSIX naming string directly from the system hardware MAC address string (`/squeezelite-XX:XX:XX:XX:XX:XX`).
