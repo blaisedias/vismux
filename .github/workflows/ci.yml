@@ -89,7 +89,7 @@ jobs:
 
     - name: Verify Binary Headers using Kernel File Inspector
       run: |
-        for target in native x86_64 x86_32 aarch64 armhf armv6; do
+        for target in native x86_64 x86_32 aarch64 armhf armv6 armv5; do
           if [ "$target" = native ]; then
             suffix=""
           else
