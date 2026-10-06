@@ -171,6 +171,7 @@ typedef struct {
     int role_id;
     char mac[18];
     int port;
+    volatile bool* keep_running;
 } discovery_responder_spec_t;
 
 typedef struct {
@@ -239,7 +240,7 @@ void run_source(const char* _shm_path, const char* mac, bool discoverable);
 void *console_listener_thread(void *arg);
 // returns allocated memory, to be freed by the caller
 discover_records_t* run_discovery_prober(uint8_t role_filter);
-pthread_t* run_discovery_responder(int role_id, const char* mac, int port);
+pthread_t* run_discovery_responder(int role_id, const char* mac, int port, volatile bool* keep_running);
 
 int is_ipaddr_local(const uint32_t s_addr);
 

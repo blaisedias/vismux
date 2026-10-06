@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
 //    bool discoverable = true;
     bool auto_add = false;
     int polling_wait_secs = 2;
-    int destination_timeout_secs = 2;
+    int destination_timeout_secs = 10;
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);

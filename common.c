@@ -204,7 +204,9 @@ static void *discovery_responder_thread(void *arg)
     disc_req_packet_t rx_packet;
     struct sockaddr_in client_addr;
 
-    while (keep_running)
+    // continue if global keep_running or if context specific keep running pointer
+    // is set and its contents are "true"
+    while (keep_running && (spec.keep_running == NULL || *spec.keep_running))
     {
         fd_set rfds;
         struct timeval tv = {.tv_sec = 0, .tv_usec = 200000};
@@ -249,10 +251,11 @@ static void *discovery_responder_thread(void *arg)
     return NULL;
 }
 
-pthread_t* run_discovery_responder(int role_id, const char* mac, int port) {
+pthread_t* run_discovery_responder(int role_id, const char* mac, int port, volatile bool *keep_running) {
     discovery_responder_spec_t* responder_spec = calloc(1, sizeof(*responder_spec));
     responder_spec->role_id = role_id;
     responder_spec->port = port;
+    responder_spec->keep_running = keep_running;
     strcpy(responder_spec->mac, mac);
     return create_thread(NULL, discovery_responder_thread, responder_spec);
 }

@@ -88,7 +88,7 @@ void run_source(const char* _shm_path, const char* mac, bool discoverable)
     char net_buf[sizeof(msg_hdr_t) + sizeof(vis_t)];
     pthread_t* disc_thread = NULL;
     if (discoverable) {
-        disc_thread = run_discovery_responder(DISCOVER_ROLE_SOURCE, mac, global_port);
+        disc_thread = run_discovery_responder(DISCOVER_ROLE_SOURCE, mac, global_port, NULL);
     }
 
     while (keep_running)

@@ -191,7 +191,7 @@ void run_destination(destination_task_t* task)
     hb_thread = create_thread(NULL, heartbeat_loop, hb_ctx);
 
     if (task->spec.discoverable && task->spec.peer.mac[0]) {
-        disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, task->spec.peer.mac, ctxt.port);
+        disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, task->spec.peer.mac, ctxt.port, &task->state.keep_running);
     }
 
     char rx_window[sizeof(msg_hdr_t) + sizeof(vis_t)];
@@ -318,7 +318,7 @@ void run_destination(destination_task_t* task)
                             ctxt.shm_path[0] = '\0';
                         }
                         if (task->spec.discoverable) {
-                            disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, ctxt.mac, ctxt.port);
+                            disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, ctxt.mac, ctxt.port, &task->state.keep_running);
                         }
                     }
                     else
@@ -540,13 +540,15 @@ void destination_sink_manager(destination_sink_t* sinks, int num_sinks, int poll
                 }
                 // if the source has been absent for a period of time signal
                 // the sink thread to stop
-                if (sink->task.state.accumulated_timeout > destination_timeout_secs && !sink->stopped) {
+                 if (sink->task.state.accumulated_timeout > destination_timeout_secs && !sink->stopped && sink->task.state.keep_running) {
                     sink->task.state.keep_running = false;
-                    log_msg(2, "%s: Signalling stop to sink on %s:%d timeout=%d",
+                    log_msg(2, "%s: Signalling stop to sink on %s:%d timeout=%d > %d",
                             sink->task.spec.peer.mac,
                             sink->task.spec.server_ip,
                             sink->task.spec.peer.port,
-                            sink->task.state.accumulated_timeout);
+                            sink->task.state.accumulated_timeout,
+                            destination_timeout_secs
+                            );
                 }
             }
         }
