@@ -37,9 +37,7 @@ char global_mac[18] = {0};
 
 #if defined(VISMUX_DEST) || defined(VISMUX_ALL)
 #define SLOT_COUNT  16
-static destination_spec_t specs[SLOT_COUNT];
-// For discovery (--discover and --destination)
-static pthread_t* threads[SLOT_COUNT];
+static destination_sink_t sinks[SLOT_COUNT];
 #endif
 
 
@@ -158,7 +156,10 @@ int main(int argc, char *argv[])
     uint8_t role_filter = 0;
     (void)role_filter;  /* usage might be removed by #ifdef so avoid compilation problem */
 #if defined(VISMUX_DEST) || defined(VISMUX_ALL)
-    bool discoverable = true;
+//    bool discoverable = true;
+    bool auto_add = false;
+    int polling_wait_secs = 10;
+    int destination_timeout_secs = 10;
 #endif
 
     signal(SIGINT, handle_signal);
@@ -209,34 +210,54 @@ int main(int argc, char *argv[])
 #if defined(VISMUX_DEST) || defined(VISMUX_ALL)
         if (strcmp(argv[i], "--server") == 0 ) {
             ARG_AVAIL(1);
-            if (ix_dest < (int)(sizeof(specs)/sizeof(specs[0]))) {
+            if (ix_dest < (int)(sizeof(sinks)/sizeof(sinks[0]))) {
+                destination_sink_t* sink = sinks + ix_dest;
+                destination_task_t* task = &sink->task;
+                memset(task, 0, sizeof(*task));
+                // duplicate the argument, we may need to tokkenise it.
                 char* src_ip = strdup(argv[++i]);
-                specs[ix_dest].server_ip = src_ip; 
-                specs[ix_dest].port = -1;
-                specs[ix_dest].mac = NULL;
-                specs[ix_dest].keep_running = true;
-
+                task->state.keep_running = true;
+                // first look for MAC address segment separator, and split the string
                 char *macp = strchr(src_ip, ',');
                 if (macp) {
                     *macp = '\0';
                     ++macp;
-                    specs[ix_dest].mac = strdup(macp);
+                    if (strlen(macp) != (sizeof(task->spec.peer.mac) - 1)
+                            || !validate_mac_spec(macp)) {
+                        log_msg(-1, "Invalid MAC address %s", macp);
+                        exit(EXIT_FAILURE);
+                    }
+                    strncpy(task->spec.peer.mac, macp, sizeof(task->spec.peer.mac)-1);
                 }
+                // then look for port segment separator, and split the string
                 char *portp = strchr(src_ip, ':');
                 if (portp) {
                     *portp = '\0';
                     ++portp;
-                    specs[ix_dest].port = atoi(portp);
+                    task->spec.peer.port = atoi(portp);
+                } else {
+                    task->spec.peer.port = global_port;
                 }
-                struct in_addr server_addr;
-                if (inet_pton(AF_INET, src_ip, &server_addr) != 1) {
+                // at this point src_ip should be IP address only, shorn of port and MAC segments
+                if (inet_pton(AF_INET, src_ip, &task->spec.peer.ip) != 1) {
                     log_msg(-1, "invalid IP address %s", src_ip);
                     exit(EXIT_FAILURE);
                 }
+                strncpy(task->spec.server_ip, src_ip, sizeof(task->spec.server_ip)-1);
+                sink->spec_setup = true;
+                free(src_ip);
                 ++ix_dest;
             } else {
-                log_msg(-1, "too many sources, max sources = %d", (int)(sizeof(specs)/sizeof(specs[0])));
+                log_msg(-1, "too many sources, max sources = %d", (int)(sizeof(sinks)/sizeof(sinks[0])));
             }
+        } else if (strcmp(argv[i], "--auto") == 0) {
+            auto_add = true;
+        } else if (strcmp(argv[i], "--polling-wait") == 0 ) {
+            ARG_AVAIL(1);
+            polling_wait_secs = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--destination-timeout") == 0 ) {
+            ARG_AVAIL(1);
+            destination_timeout_secs = atoi(argv[++i]);
         } else 
 #endif /* VISMUX_DEST || VISMUX_ALL */
         if (strcmp(argv[i], "--mac") == 0 && i + 1 < argc) {
@@ -299,6 +320,9 @@ int main(int argc, char *argv[])
 #endif
 #if defined VISMUX_DEST || defined VISMUX_ALL
             printf("    --server can be repeated multiple times, once for each source\n");
+            printf("    --auto add newly discovered sources");
+            printf("    --polling-wait delay between discovery calls (default=%d)", polling_wait_secs);
+            printf("    --destination-timeout period of disconnection on destinastion, after which to stop the destination (default=%d)", destination_timeout_secs);
 #endif
 #ifdef VISMUX_ALL
             printf("  Discovery Mode:   %s --discover[-source|-destination] [--discover-format <fmt>] [--discover-timeout <sec>] [--discover-port <p>\n", argv[0]);
@@ -480,58 +504,10 @@ int main(int argc, char *argv[])
     {
         if (ix_dest == 0) {
             log_msg(-1, "No sources specified, using discovery to add sources.");
-            while (keep_running)
-            {
-                discover_records_t* discovery  = run_discovery_prober(DISCOVER_ROLE_SOURCE);
-                for (int ix = 0; ix < discovery->count; ++ix) {
-                    destination_spec_t* spec = specs + ix_dest;
-                    peer_record_t* peer = discovery->records +ix;
-                    char peer_ipaddr_str[INET_ADDRSTRLEN];
-                    inet_ntop(AF_INET, &peer->ip, peer_ipaddr_str, sizeof(peer_ipaddr_str));
-                    switch(is_ipaddr_local(peer->ip)){
-                        case -1:
-                            log_msg(-1, "Unable to retrieve local IP addresses");
-                            exit(EXIT_FAILURE);
-                            break;
-                        case 0:
-                            log_msg(-1, "Ignoring local source : %s:%d MAC:%s", peer_ipaddr_str, (int)peer->port, peer->mac);
-                            break;
-                        case 1:
-                            spec->keep_running = true;
-                            spec->port = peer->port;
-                            spec->mac = strdup(peer->mac);
-                            spec->server_ip = strdup(peer_ipaddr_str);
-                            inet_ntop(AF_INET, &peer->ip, (char *)spec->server_ip, INET_ADDRSTRLEN);
-                            log_msg(-1, "Adding remote source  : %s:%d MAC:%s", spec->server_ip, (int)spec->port, spec->mac);
-                            ++ix_dest;
-                            break;
-                    }
-                }
-                
-                if (ix_dest == 0 && wait_for_source) {
-                    log_msg(3, "No remote sources discovered");
-                    sleep(2);
-                } else {
-                    break;
-                }
-            }
-        }
-
-        for(int ix =0; ix < (int)(sizeof(specs)/sizeof(specs[0])); ++ix) {
-            destination_spec_t* spec = specs + ix;
-            spec->discoverable = discoverable;
-            if (spec->port < 0) {
-                spec->port = global_port;
-            }
-            if (spec->keep_running && spec->server_ip) {
-                threads[ix] = create_thread(NULL, run_destination_thread, spec);
-            }
-        }
-
-        for(int ix =0; ix < (int)(sizeof(threads)/sizeof(threads[0])); ++ix) {
-            join_thread(threads + ix);
-        }
-        log_msg(2, "Terminating as no destination threads are running");
+            destination_sink_manager(sinks, (int)(sizeof(sinks)/sizeof(sinks[0])), polling_wait_secs, destination_timeout_secs, true);
+          } else {
+            destination_sink_manager(sinks, (int)(sizeof(sinks)/sizeof(sinks[0])), polling_wait_secs, destination_timeout_secs, auto_add);
+          }
         keep_running = 0;
     }
 #endif /* VISMUX_DEST || VISMUX_ALL */

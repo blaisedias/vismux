@@ -183,12 +183,42 @@ typedef struct {
 }destination_context_t;
 
 typedef struct {
-    const char* server_ip;
-    const char* mac;
-    int port;
-    volatile bool keep_running;
-    bool  discoverable;
-} destination_spec_t;
+        // per destination keep running flag, set external to destination threads,
+        // readonly in the destination thread
+        volatile bool keep_running;
+        // per destination thread active flag
+        // writeonly in the destination thread
+        // readonly elsewhere when destination thread is not running
+        // creators should set this flag prior to creating the destination 
+        // thread to avoid race conditions
+        volatile bool active;
+        // per destination thread current accumulated data receive timeout
+        // writeonly in the destination thread
+        // readonly elsewhere when destination thread is not running
+        // creators should set this to 0 prior to creating the destination 
+        // thread to avoid race conditions
+        volatile int  accumulated_timeout;
+} destination_thread_state_t;
+
+
+typedef struct {
+    peer_record_t peer;
+    char          server_ip[INET_ADDRSTRLEN];
+    bool          discoverable;
+} destination_specification_t;
+
+typedef struct {
+    destination_specification_t  spec;
+    destination_thread_state_t   state;
+    pthread_t*                   thread;
+}destination_task_t;
+
+// struct to facilitate managing multiple destination service
+typedef struct {
+    destination_task_t  task;
+    volatile bool       spec_setup;
+    volatile bool       stopped;
+} destination_sink_t;
 
 bool validate_and_format_mac(const char *mac_in, char *shm_out, size_t out_len);
 bool validate_mac_spec(const char *mac_in);
@@ -200,8 +230,9 @@ pthread_t* create_thread(const pthread_attr_t*  attr,
                         void* arg);
 void join_thread(pthread_t** ppt);
 
-void run_destination(destination_spec_t* spec);
+void run_destination(destination_task_t* spec);
 void* run_destination_thread(void*);
+void destination_sink_manager(destination_sink_t* sinks, int num_sinks, int poll_wait_secs, int destination_timeout_secs, bool add_discovered);
 
 void run_source(const char* _shm_path, const char* mac, bool discoverable);
 

@@ -133,7 +133,7 @@ void *heartbeat_loop(void *arg)
     return NULL;
 }
 
-void run_destination(destination_spec_t* spec)
+void run_destination(destination_task_t* task)
 {
     pthread_t* hb_thread = NULL;
     pthread_t* disc_thread = NULL;
@@ -141,20 +141,22 @@ void run_destination(destination_spec_t* spec)
     destination_context_t ctxt = {
         .shm_fd = -1,
         .sock_fd = -1,
-        .port = spec->port,
+        .port = task->spec.peer.port,
         .shm_ptr = NULL,
         .mac = {0},
         .shm_path = {0},
     };
-    if (!spec->keep_running) {
-        log_msg(-1, "%s spec set to not run", spec->mac);
+
+    if (!task->state.keep_running) {
+        task->state.active = false;
+        log_msg(-1, "%s spec set to not run", task->spec.peer.mac);
         return;
     }
-    if (spec->mac) {
-        if (!validate_and_format_mac(spec->mac, ctxt.shm_path, sizeof(ctxt.shm_path))) {
-            log_msg(-1, "Invalid MAC address %s", spec->mac);
+    if (task->spec.peer.mac[0]) {
+        if (!validate_and_format_mac(task->spec.peer.mac, ctxt.shm_path, sizeof(ctxt.shm_path))) {
+            log_msg(-1, "Invalid MAC address %s", task->spec.peer.mac);
         }
-        snprintf(ctxt.mac, sizeof(ctxt.mac), "%s", spec->mac);
+        snprintf(ctxt.mac, sizeof(ctxt.mac), "%s", task->spec.peer.mac);
     } else {
         ctxt.mac[0] = '\0';
     }
@@ -163,11 +165,11 @@ void run_destination(destination_spec_t* spec)
         exit(EXIT_FAILURE);
     }
 
-    log_msg(2, "%s: Destination Engine Online (%s) expecting data from: %s:%d", ctxt.mac, APP_VERSION, spec->server_ip, ctxt.port);
+    log_msg(2, "%s: Destination Engine Online (%s) expecting data from: %s:%d", ctxt.mac, APP_VERSION, task->spec.server_ip, ctxt.port);
 
     ctxt.sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
     struct sockaddr_in server_addr = {.sin_family = AF_INET, .sin_port = htons(ctxt.port)};
-    inet_pton(AF_INET, spec->server_ip, &server_addr.sin_addr);
+    inet_pton(AF_INET, task->spec.server_ip, &server_addr.sin_addr);
 
     struct sockaddr_in local_bound_addr;
     socklen_t local_bound_len = sizeof(local_bound_addr);
@@ -184,12 +186,12 @@ void run_destination(destination_spec_t* spec)
     hb_ctx_t *hb_ctx = (hb_ctx_t *)malloc(sizeof(hb_ctx_t));
     hb_ctx->sock_fd_ptr = &ctxt.sock_fd;
     hb_ctx->server_addr = server_addr;
-    hb_ctx->keep_running = &spec->keep_running;
+    hb_ctx->keep_running = &task->state.keep_running;
 
     hb_thread = create_thread(NULL, heartbeat_loop, hb_ctx);
 
-    if (spec->discoverable && spec->mac) {
-        disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, spec->mac, ctxt.port);
+    if (task->spec.discoverable && task->spec.peer.mac[0]) {
+        disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, task->spec.peer.mac, ctxt.port);
     }
 
     char rx_window[sizeof(msg_hdr_t) + sizeof(vis_t)];
@@ -210,7 +212,9 @@ void run_destination(destination_spec_t* spec)
     time_t last_mac_response_time = time(NULL);
     bool is_link_active = shm_ready;
 
-    while (keep_running && spec->keep_running)
+    task->state.active = true;
+    task->state.accumulated_timeout = 0;
+    while (keep_running && task->state.keep_running)
     {
         time_t now_check = time(NULL);
         ssize_t bytes_in = recvfrom(ctxt.sock_fd, rx_window, sizeof(rx_window), 0, NULL, NULL);
@@ -222,6 +226,7 @@ void run_destination(destination_spec_t* spec)
                                   (now_check - last_success_packet_time >= timeout_secs);
             if (mac_negotiation_timed_out || link_timed_out)
             {
+                task->state.accumulated_timeout += now_check - last_success_packet_time;
                 int rotation_interval = mac_negotiation_timed_out ? mac_timeout_secs : timeout_secs;
                 if (now_check - last_rotation_time >= rotation_interval)
                 {
@@ -281,6 +286,8 @@ void run_destination(destination_spec_t* spec)
             continue;
         }
 
+        task->state.accumulated_timeout = 0;
+
         if (bytes_in < (ssize_t)sizeof(msg_hdr_t))
             continue;
         msg_hdr_t *msg = (msg_hdr_t *)rx_window;
@@ -310,7 +317,7 @@ void run_destination(destination_spec_t* spec)
                         {
                             ctxt.shm_path[0] = '\0';
                         }
-                        if (spec->discoverable) {
+                        if (task->spec.discoverable) {
                             disc_thread = run_discovery_responder(DISCOVER_ROLE_DESTINATION, ctxt.mac, ctxt.port);
                         }
                     }
@@ -414,16 +421,200 @@ void run_destination(destination_spec_t* spec)
     join_thread(&hb_thread);
     join_thread(&disc_thread);
     release_system_resources(&ctxt);
+    // Set this at the absolute end, to signal thread termination,
+    // so that thread join times will be short.
+    task->state.active = false;
 }
 
+/*
 void* run_destination_thread(void* arg) {
     if (arg ) {
-        destination_spec_t spec;
-        memcpy(&spec, arg, sizeof(spec));
-        run_destination(&spec);
+        destination_task_t task;
+        memcpy(&task, arg, sizeof(task));
+        run_destination(&task);
     } else {
         log_msg(-1, "run_destination_thread with NULL argument");
     }
     return NULL;
 }
+*/
 
+static void* run_managed_destination_thread(void* arg) {
+    if (arg ) {
+        run_destination((destination_task_t*)arg);
+    } else {
+        log_msg(-1, "run_managed_destination_thread with NULL argument");
+    }
+    return NULL;
+}
+
+// invoke only if the thread associated with the spec is not running
+static void init_destination_state(destination_thread_state_t* state) {
+    state->keep_running = true;
+    state->active = true;
+    state->accumulated_timeout = 0;
+}
+
+static bool setup_sink_peer (destination_sink_t* sink, peer_record_t* peer) {
+    if (sink && peer) {
+        if (is_ipaddr_local(peer->ip) == 0) {
+            return false;
+        }
+
+        // setup the task spec
+        destination_task_t* task = &sink->task;
+        memcpy(&task->spec.peer, peer, sizeof(task->spec.peer));
+        inet_ntop(AF_INET, &peer->ip, task->spec.server_ip, sizeof(task->spec.server_ip));
+        // TODO: make this configurable?
+        task->spec.discoverable = false;
+        sink->spec_setup = true;
+    }
+    return true;
+}
+
+static bool start_sink(destination_sink_t* sink) {
+    if (sink) {
+        destination_task_t* task = &sink->task;
+        init_destination_state(&task->state);
+        sink->stopped = false;
+        sink->task.thread = create_thread(NULL, run_managed_destination_thread, task);
+    }
+    return false;
+}
+
+
+// manage destination threads.
+// - polls the set of available sources
+// - starts destination threads for defined sources or optionally for all sources found (add_discovered == true)
+// - stops a destination thread when the source has been offline for a defined period
+// - restarts a destination thread when a source is online again.
+// - optionally adds source definitions for newly discovered sources (add discovered == true)
+//
+// stopping a destination thread and restarting prevents flooding logs
+// with failure to connect messages and improves stability.
+//
+// The polling interval is not regular, it is guaranteed to be at least poll_wait_secs.
+// The time taken to discover all the sources is variable and contributes towards poll rate.
+//
+// runs as long as the  global variable keep_running is true.
+//
+// formal parameters:
+//  sinks: pointer to the array of sink structures, containing sink definitions (can be none)
+//  num_sinks: maximum number of sinks, that can be serviced (number of elements in the sinks array)
+//  poll_wait_secs: number of seconds to wait after a discovery 
+//  add_discovered: flag true=> add sources not previously defined in the sinks array
+//
+//  return value: None
+void destination_sink_manager(destination_sink_t* sinks, int num_sinks, int poll_wait_secs, int destination_timeout_secs, bool add_discovered) {
+    if (add_discovered) {
+        log_msg(2, "Starting automatic remote connection, polling vismux sources at around %d seconds", poll_wait_secs);
+    } else {
+        log_msg(2, "Starting remote connections");
+    }
+    // initialise sinks, none of the sinks have been started so clear the stopped flag.
+    for (int ix_sink = 0; ix_sink < num_sinks; ++ix_sink) {
+        sinks[ix_sink].stopped = false;
+    }
+    do {
+        // manage liveness of the sinks
+        for (int ix_sink = 0; ix_sink < num_sinks; ++ix_sink) {
+            destination_sink_t* sink = sinks + ix_sink;
+            if (sink->spec_setup) {
+                if (sink->task.state.active == false) {
+                    if(sink->task.thread) {
+                        // the sink thread has terminated, clean up
+                        join_thread(&sink->task.thread);
+                        sink->stopped = true;
+                        log_msg(2, "Stopped: sink on %s:%d %s",
+                                sink->task.spec.server_ip,
+                                sink->task.spec.peer.port,
+                                sink->task.spec.peer.mac);
+                        } else if (!sink->stopped) {
+                            start_sink(sink);
+                            log_msg(2, "Started: sink on %s:%d,%s",
+                                sink->task.spec.server_ip,
+                                sink->task.spec.peer.port,
+                                sink->task.spec.peer.mac);
+                        }
+                }
+                // if the source has been absent for a period of time signal
+                // the sink thread to stop
+                if (sink->task.state.accumulated_timeout > destination_timeout_secs && !sink->stopped) {
+                    sink->task.state.keep_running = false;
+                    log_msg(2, "Signalling stop to sink on %s:%d %s %d",
+                            sink->task.spec.server_ip,
+                            sink->task.spec.peer.port,
+                            sink->task.spec.peer.mac,
+                            sink->task.state.accumulated_timeout);
+                }
+            }
+        }
+
+        discover_records_t* discovery  = run_discovery_prober(DISCOVER_ROLE_SOURCE);
+        for (int ix_discovery = 0; ix_discovery < discovery->count; ++ix_discovery) {
+            peer_record_t* peer = discovery->records +ix_discovery;
+            int is_local = is_ipaddr_local(peer->ip);
+            if (is_local == 0) { continue; }
+            if (is_local < 0) { 
+                log_msg(-1, "Unable to retrieve local IP addresses");
+                exit(EXIT_FAILURE);
+            }
+            bool found = false;
+            destination_sink_t* avail_sink = NULL;
+            for (int ix_sink = 0; ix_sink < num_sinks; ++ix_sink) {
+                destination_sink_t* sink = sinks + ix_sink;
+                if (sink->spec_setup) {
+                        if (sink->task.spec.peer.ip == peer->ip 
+                            && sink->task.spec.peer.port == peer->port 
+                            && sink->task.spec.peer.role == peer->role
+                            && memcmp(sink->task.spec.peer.mac, peer->mac, sizeof(peer->mac)) == 0) {
+                        found = true;
+                        // @here
+                        // - If we signalled to thread to terminate immediately above
+                        // try to cancel the termination.
+                        // This avoids dropping the connection during this threads
+                        // polling interval: it is possible that the source has just come online
+                        // The pathological case would be source discovery is operational,
+                        // but source data streaming is not.
+                        sink->task.state.keep_running = true;
+                        // - the sink thread was previously terminated.
+                        if (sink->task.thread == NULL) {
+                            // restart the sink
+                            start_sink(sink);
+                            log_msg(2, "Restarted: sink on %s:%d,%s",
+                                sink->task.spec.server_ip,
+                                sink->task.spec.peer.port,
+                                sink->task.spec.peer.mac);
+                        }
+                    }
+                } else if (!avail_sink) {
+                    // record pointer to "first" available slot
+                    avail_sink = sink;
+                }
+            }
+
+            if (!found && add_discovered) {
+               if(avail_sink) {
+                   setup_sink_peer(avail_sink, peer);
+                   start_sink(avail_sink);
+                    log_msg(2, "Started: sink on %s:%d,%s",
+                        avail_sink->task.spec.server_ip,
+                        avail_sink->task.spec.peer.port,
+                        avail_sink->task.spec.peer.mac);
+               } else {
+                   log_msg(-1, "no free slots available for sink");
+               }
+            }
+        }
+        for (int isleep = 0; isleep < poll_wait_secs && keep_running; ++isleep) {
+            sleep(1);
+        }
+    } while(keep_running);
+
+    for(int ix = 0; ix < num_sinks; ++ix) {
+        if (sinks[ix].task.thread) {
+            join_thread(&sinks[ix].task.thread);
+        }
+    }
+    log_msg(2, "Stopped remote connections");
+}

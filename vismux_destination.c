@@ -26,17 +26,18 @@
 
 #include "vismux.h"
 
-#define SLOT_COUNT  16
-static destination_spec_t specs[SLOT_COUNT];
-static pthread_t* threads[SLOT_COUNT];
+static destination_sink_t sinks[MAX_SEEN_PEERS];
 
 int main(int argc, char *argv[])
 {
-    int ix_dest = 0;
+    int dest_count = 0;
     bool daemonise = false;
     const char* logfile = NULL;
     pthread_t* ui_thread = NULL;
-    bool discoverable = true;
+//    bool discoverable = true;
+    bool auto_add = false;
+    int polling_wait_secs = 2;
+    int destination_timeout_secs = 2;
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
@@ -47,33 +48,46 @@ int main(int argc, char *argv[])
     {
         if (strcmp(argv[i], "--source") == 0 ) {
             ARG_AVAIL(1);
-            if (ix_dest < (int)(sizeof(specs)/sizeof(specs[0]))) {
+            if (dest_count < (int)(sizeof(sinks)/sizeof(sinks[0]))) {
+                destination_sink_t* sink = sinks + dest_count;
+                destination_task_t* task = &sink->task;
+                memset(task, 0, sizeof(*task));
+                // duplicate the argument, we may need to tokkenise it.
                 char* src_ip = strdup(argv[++i]);
-                specs[ix_dest].server_ip = src_ip; 
-                specs[ix_dest].port = -1;
-                specs[ix_dest].mac = NULL;
-                specs[ix_dest].keep_running = true;
-
+                task->spec.peer.port = -1;
+                task->state.keep_running = true;
+                // first look for MAC address segment separator, and split the string
                 char *macp = strchr(src_ip, ',');
                 if (macp) {
                     *macp = '\0';
                     ++macp;
-                    specs[ix_dest].mac = strdup(macp);
+                    if (strlen(macp) != (sizeof(task->spec.peer.mac) - 1)
+                            || !validate_mac_spec(macp)) {
+                        log_msg(-1, "Invalid MAC address %s", macp);
+                        exit(EXIT_FAILURE);
+                    }
+                    strncpy(task->spec.peer.mac, macp, sizeof(task->spec.peer.mac)-1);
                 }
+                // then look for port segment separator, and split the string
                 char *portp = strchr(src_ip, ':');
                 if (portp) {
                     *portp = '\0';
                     ++portp;
-                    specs[ix_dest].port = atoi(portp);
+                    task->spec.peer.port = atoi(portp);
+                } else {
+                    task->spec.peer.port = global_port;
                 }
-                struct in_addr server_addr;
-                if (inet_pton(AF_INET, src_ip, &server_addr) != 1) {
+                // at this point src_ip should be IP address only, shorn of port and MAC segments
+                if (inet_pton(AF_INET, src_ip, &task->spec.peer.ip) != 1) {
                     log_msg(-1, "invalid IP address %s", src_ip);
                     exit(EXIT_FAILURE);
                 }
-                ++ix_dest;
+                strncpy(task->spec.server_ip, src_ip, sizeof(task->spec.server_ip)-1);
+                sink->spec_setup = true;
+                free(src_ip);
+                ++dest_count;
             } else {
-                log_msg(-1, "too many sources, max sources = %d", (int)(sizeof(specs)/sizeof(specs[0])));
+                log_msg(-1, "too many sources, max sources = %d", (int)(sizeof(sinks)/sizeof(sinks[0])));
             }
         }
         else if (strcmp(argv[i], "--port") == 0 ) {
@@ -96,8 +110,10 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--stats-int") == 0 ) {
             ARG_AVAIL(1);
             stats_int = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--not-discoverable") == 0) {
-            discoverable = false;
+//        } else if (strcmp(argv[i], "--not-discoverable") == 0) {
+//            discoverable = false;
+        } else if (strcmp(argv[i], "--auto") == 0) {
+            auto_add = true;
         } else if (strcmp(argv[i], "-z") == 0 || strcmp(argv[i], "--daemonise") == 0) {
             daemonise = true;
         } else if ( (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--logfile") == 0)
@@ -107,11 +123,21 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf("vismux version %s\n", APP_VERSION);
             return 0; // Clean exit immediately
+        } else if (strcmp(argv[i], "--polling-wait") == 0 ) {
+            ARG_AVAIL(1);
+            polling_wait_secs = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--destination-timeout") == 0 ) {
+            ARG_AVAIL(1);
+            destination_timeout_secs = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("Squeezelite Replicator Destination v%s\nUsage Options:\n", APP_VERSION);
             printf("%s  <--source <source_ip>[:port][,mac_address]> ", argv[0]);
-            printf("  [--mac-timeout <sec>] [--port <p>] [--proto-version <1|2>]  [--not-discoverable] [--remove-shm] [--stats-int <interval_secs>]\n\n");
+//            printf("  [--mac-timeout <sec>] [--port <p>] [--proto-version <1|2>]  [--not-discoverable] [--remove-shm] [--stats-int <interval_secs>]\n\n");
+            printf("  [--mac-timeout <sec>] [--port <p>] [--proto-version <1|2>] [--remove-shm] [--stats-int <interval_secs>]\n\n");
             printf(" --source can be repeated multiple times, once for each source\n");
+            printf(" --auto add newly discovered sources\n");
+            printf(" --polling-wait delay between discovery calls (default=%d)\n", polling_wait_secs);
+            printf(" --destination-timeout period of disconnection on destinastion, after which to stop the destination (default=%d)\n", destination_timeout_secs);
             printf("Global Flags:\n");
             printf("  -h, --help        Display this help message\n");
             printf("  -v, --version     Display application version details\n");
@@ -158,49 +184,13 @@ int main(int argc, char *argv[])
     puts("");
     fflush(stdout);
 
-    if (ix_dest == 0) {
-        log_msg(-1, "No sources specified, using discovery to add sources.");
-        discover_records_t* discovery  = run_discovery_prober(DISCOVER_ROLE_SOURCE);
-        for (int ix = 0; ix < discovery->count; ++ix) {
-            destination_spec_t* spec = specs + ix_dest;
-            peer_record_t* peer = discovery->records +ix;
-            char peer_ipaddr_str[INET_ADDRSTRLEN];
-            inet_ntop(AF_INET, &peer->ip, peer_ipaddr_str, sizeof(peer_ipaddr_str));
-            switch(is_ipaddr_local(peer->ip)){
-                case -1:
-                    log_msg(-1, "Unable to retrieve local IP addresses");
-                    exit(EXIT_FAILURE);
-                    break;
-                case 0:
-                    log_msg(-1, "Ignoring local source : %s:%d MAC:%s", peer_ipaddr_str, (int)peer->port, peer->mac);
-                    break;
-                case 1:
-                    spec->keep_running = true;
-                    spec->port = peer->port;
-                    spec->mac = strdup(peer->mac);
-                    spec->server_ip = strdup(peer_ipaddr_str);
-                    inet_ntop(AF_INET, &peer->ip, (char *)spec->server_ip, INET_ADDRSTRLEN);
-                    log_msg(-1, "Adding remote source  : %s:%d MAC:%s", spec->server_ip, (int)spec->port, spec->mac);
-                    ++ix_dest;
-                    break;
-            }
-        }
+    if (dest_count == 0) {
+        log_msg(-1, "No sources specified, turning on auto");
+        destination_sink_manager(sinks, (int)(sizeof(sinks)/sizeof(sinks[0])), polling_wait_secs, destination_timeout_secs, true);
+    } else {
+        destination_sink_manager(sinks, (int)(sizeof(sinks)/sizeof(sinks[0])), polling_wait_secs, destination_timeout_secs,  auto_add);
     }
 
-    for(int ix =0; ix < (int)(sizeof(specs)/sizeof(specs[0])); ++ix) {
-        destination_spec_t* spec = specs + ix;
-        spec->discoverable = discoverable;
-        if (spec->port < 0) {
-            spec->port = global_port;
-        }
-        if (spec->keep_running && spec->server_ip) {
-            threads[ix] = create_thread(NULL, run_destination_thread, spec);
-        }
-    }
-
-    for(int ix =0; ix < (int)(sizeof(threads)/sizeof(threads[0])); ++ix) {
-        join_thread(threads + ix);
-    }
     log_msg(2, "Terminating no destination threads are running");
     keep_running = 0;
     join_thread(&ui_thread);

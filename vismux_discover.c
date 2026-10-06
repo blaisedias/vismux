@@ -28,6 +28,7 @@
 
 int main(int argc, char *argv[])
 {
+    bool fmt_cmdline = false;
     uint8_t role_filter = 0;
     for (int i = 1; i < argc; i++)
     {
@@ -39,6 +40,8 @@ int main(int argc, char *argv[])
             discover_timeout_secs = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--discover-port") == 0 && i + 1 < argc) {
             discover_port = atoi(argv[++i]);
+        } else if (0 == strcmp(argv[i], "--format-commandline")) {
+            fmt_cmdline = true;
         } else {
             fprintf(stderr, "Unrecognized option: %s.\n", argv[i]);
             return 1;
@@ -55,12 +58,19 @@ int main(int argc, char *argv[])
                 char ip_str[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &discovery->records[ix].ip, ip_str, INET_ADDRSTRLEN);
 
-                printf("type:%s, IP address:%s, port:%u, MAC address:%s, version: %s\n",
-                    (discovery->records[ix].role == DISCOVER_ROLE_SOURCE) ? "SOURCE" : "DESTINATION",
-                    ip_str,
-                    discovery->records[ix].port,
-                    discovery->records[ix].mac,
-                    discovery->records[ix].version);
+                if (role_filter == DISCOVER_ROLE_SOURCE && fmt_cmdline) {
+                    printf("--source '%s:%u,%s'\n",
+                        ip_str,
+                        discovery->records[ix].port,
+                        discovery->records[ix].mac);
+                } else {
+                    printf("type:%s, IP address:%s, port:%u, MAC address:%s, version: %s\n",
+                        (discovery->records[ix].role == DISCOVER_ROLE_SOURCE) ? "SOURCE" : "DESTINATION",
+                        ip_str,
+                        discovery->records[ix].port,
+                        discovery->records[ix].mac,
+                        discovery->records[ix].version);
+                }
             }
         }
         free(discovery);
