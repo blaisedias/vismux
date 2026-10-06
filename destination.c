@@ -525,26 +525,27 @@ void destination_sink_manager(destination_sink_t* sinks, int num_sinks, int poll
                         // the sink thread has terminated, clean up
                         join_thread(&sink->task.thread);
                         sink->stopped = true;
-                        log_msg(2, "Stopped: sink on %s:%d %s",
+                        log_msg(2, "%s: Stopped: sink on %s:%d",
+                                sink->task.spec.peer.mac,
                                 sink->task.spec.server_ip,
-                                sink->task.spec.peer.port,
-                                sink->task.spec.peer.mac);
+                                sink->task.spec.peer.port
+                                );
                         } else if (!sink->stopped) {
                             start_sink(sink);
-                            log_msg(2, "Started: sink on %s:%d,%s",
-                                sink->task.spec.server_ip,
-                                sink->task.spec.peer.port,
-                                sink->task.spec.peer.mac);
+                            log_msg(2, "%s: Started: sink on %s:%d",
+                                    sink->task.spec.peer.mac,
+                                    sink->task.spec.server_ip,
+                                    sink->task.spec.peer.port);
                         }
                 }
                 // if the source has been absent for a period of time signal
                 // the sink thread to stop
                 if (sink->task.state.accumulated_timeout > destination_timeout_secs && !sink->stopped) {
                     sink->task.state.keep_running = false;
-                    log_msg(2, "Signalling stop to sink on %s:%d %s %d",
+                    log_msg(2, "%s: Signalling stop to sink on %s:%d timeout=%d",
+                            sink->task.spec.peer.mac,
                             sink->task.spec.server_ip,
                             sink->task.spec.peer.port,
-                            sink->task.spec.peer.mac,
                             sink->task.state.accumulated_timeout);
                 }
             }
@@ -581,10 +582,10 @@ void destination_sink_manager(destination_sink_t* sinks, int num_sinks, int poll
                         if (sink->task.thread == NULL) {
                             // restart the sink
                             start_sink(sink);
-                            log_msg(2, "Restarted: sink on %s:%d,%s",
+                            log_msg(2, "%s: Restarted: sink on %s:%d",
+                                sink->task.spec.peer.mac,
                                 sink->task.spec.server_ip,
-                                sink->task.spec.peer.port,
-                                sink->task.spec.peer.mac);
+                                sink->task.spec.peer.port);
                         }
                     }
                 } else if (!avail_sink) {
@@ -597,10 +598,10 @@ void destination_sink_manager(destination_sink_t* sinks, int num_sinks, int poll
                if(avail_sink) {
                    setup_sink_peer(avail_sink, peer);
                    start_sink(avail_sink);
-                    log_msg(2, "Started: sink on %s:%d,%s",
+                    log_msg(2, "%s: Started: sink on %s:%d",
+                        avail_sink->task.spec.peer.mac,
                         avail_sink->task.spec.server_ip,
-                        avail_sink->task.spec.peer.port,
-                        avail_sink->task.spec.peer.mac);
+                        avail_sink->task.spec.peer.port);
                } else {
                    log_msg(-1, "no free slots available for sink");
                }
