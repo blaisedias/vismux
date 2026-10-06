@@ -466,7 +466,7 @@ static bool setup_sink_peer (destination_sink_t* sink, peer_record_t* peer) {
         memcpy(&task->spec.peer, peer, sizeof(task->spec.peer));
         inet_ntop(AF_INET, &peer->ip, task->spec.server_ip, sizeof(task->spec.server_ip));
         // TODO: make this configurable?
-        task->spec.discoverable = false;
+        task->spec.discoverable = true;
         sink->spec_setup = true;
     }
     return true;

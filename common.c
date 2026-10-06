@@ -94,6 +94,8 @@ void log_msg(int level, const char *fmt, ...)
             lbl = "WARN";
         else if (level == 3)
             lbl = "DEBUG";
+        else if (level == 4)
+            lbl = "VERBOSE";
 
         va_list args;
         va_start(args, fmt);
@@ -234,7 +236,7 @@ static void *discovery_responder_thread(void *arg)
                     inet_ntop(AF_INET, &client_addr.sin_addr, target_ip_str, INET_ADDRSTRLEN);
 
                     // Debug log output tracing the dynamic network reply dispatch
-                    log_msg(3, "Dispatching discovery response packet back to prober host: %s:%d",
+                    log_msg(4, "Dispatching discovery response packet back to prober host: %s:%d",
                             target_ip_str, ntohs(client_addr.sin_port));
 
                     sendto(disc_fd, &tx_packet, sizeof(disc_resp_packet_t), 0,
